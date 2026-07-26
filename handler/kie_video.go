@@ -12,16 +12,11 @@ import (
 	"strings"
 
 	"github.com/tigerowo/infinite-canvas/model"
+	"github.com/tigerowo/infinite-canvas/service"
 )
 
 func isKIEChannel(channel model.ModelChannel, modelName string) bool {
-	protocol := strings.ToLower(strings.TrimSpace(channel.Protocol))
-	baseURL := strings.ToLower(strings.TrimSpace(channel.BaseURL))
-	modelName = strings.ToLower(strings.TrimSpace(modelName))
-
-	return protocol == "kie" ||
-		strings.Contains(baseURL, "kie.ai") ||
-		strings.Contains(modelName, "kie/")
+	return service.IsKIEChannel(channel, modelName)
 }
 
 func normalizeKIEVideoBody(body []byte, contentType string, modelName string, channel model.ModelChannel) ([]byte, string, error) {
