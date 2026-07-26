@@ -11,6 +11,7 @@ import (
 )
 
 const proxyImageMaxBytes = 15 << 20
+const uploadFileMaxBytes = 50 << 20
 
 // StorageConfig 返回公开存储配置。
 func StorageConfig(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +59,11 @@ func MeasureUserStorageProvider(w http.ResponseWriter, r *http.Request) {
 
 // UploadFile 上传文件到对象存储。
 func UploadFile(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, uploadFileMaxBytes+1)
+	if err := r.ParseMultipartForm(uploadFileMaxBytes); err != nil {
+		FailWithStatus(w, http.StatusRequestEntityTooLarge, "上传文件过大，最大 50MB")
+		return
+	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		Fail(w, "请选择要上传的文件")

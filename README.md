@@ -87,11 +87,12 @@ docker compose -f docker-compose.local.yml up -d --build
 如果使用 New API，可在 `系统设置 -> 聊天方式 -> 添加聊天设置` 中填入：
 
 ```text
-https://infinite-canvas-cpco.onrender.com?apiKey={key}&baseUrl={address}
+https://infinite-canvas-cpco.onrender.com#apiKey={key}&baseUrl={address}
 ```
 
-跳转后会自动打开配置弹窗并填入 API Key 和 Base URL。
+跳转后会从 **URL hash 片段** 读取并填入 API Key / Base URL（不会再接受 query 传密钥，避免进入访问日志）。
 如果自己部署了，可以把 `https://infinite-canvas-cpco.onrender.com` 替换成你部署的地址。
+也可通过同源 `postMessage({ type: "infinite-canvas:channel-config", apiKey, baseUrl })` 注入。
 
 ## 效果展示
 

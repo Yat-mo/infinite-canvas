@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/tigerowo/infinite-canvas/model"
-	"github.com/tigerowo/infinite-canvas/repository"
 )
 
 func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftRequest) (WorkflowAgentDraftResponse, error) {
@@ -154,7 +153,7 @@ func workflowDraftModel(modelName string) (string, error) {
 	if modelName != "" {
 		return modelName, nil
 	}
-	settings, err := repository.GetSettings()
+	settings, err := loadSettingsDecrypted()
 	if err != nil {
 		return "", err
 	}
@@ -196,7 +195,7 @@ func workflowDraftChannel(request WorkflowAgentDraftRequest, modelName string) (
 
 func workflowAgentMessages(prompt string, references []string) []map[string]any {
 	systemPrompt := ""
-	if settings, err := repository.GetSettings(); err == nil {
+	if settings, err := loadSettingsDecrypted(); err == nil {
 		normalized := normalizeSettings(settings)
 		systemPrompt = strings.TrimSpace(normalized.Public.ModelChannel.SystemPrompts.WorkflowAgent)
 	}

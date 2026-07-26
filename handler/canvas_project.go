@@ -8,12 +8,21 @@ import (
 )
 
 func UserCanvasProjects(w http.ResponseWriter, r *http.Request) {
-	projects, err := service.CurrentUserCanvasProjects(r.Context())
+	projects, err := service.CurrentUserCanvasProjectSummaries(r.Context())
 	if err != nil {
 		FailError(w, err)
 		return
 	}
 	OK(w, projects)
+}
+
+func UserCanvasProject(w http.ResponseWriter, r *http.Request, id string) {
+	project, err := service.CurrentUserCanvasProject(r.Context(), id)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, project)
 }
 
 func SaveUserCanvasProject(w http.ResponseWriter, r *http.Request) {

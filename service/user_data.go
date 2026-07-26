@@ -72,7 +72,7 @@ func SelectUserLocalModelChannelForModel(userID string, modelName string, channe
 			continue
 		}
 		baseURL := strings.TrimSpace(channel.BaseURL)
-		apiKey := strings.TrimSpace(channel.APIKey)
+		apiKey := strings.TrimSpace(mustDecryptSecret(channel.APIKey))
 		if baseURL == "" || apiKey == "" {
 			return model.ModelChannel{}, errors.New("本地渠道配置不完整")
 		}
@@ -137,11 +137,12 @@ func CurrentUserConfig(ctx context.Context) (UserConfigPayload, error) {
 		return result, nil
 	}
 	if strings.TrimSpace(config.ModelConfig) != "" {
-		result.ModelConfig = json.RawMessage(config.ModelConfig)
+		result.ModelConfig = OpenUserModelConfigJSON(json.RawMessage(config.ModelConfig))
 	}
 	if strings.TrimSpace(config.StorageProvider) != "" {
 		var provider StorageObjectProviderInput
 		if err := json.Unmarshal([]byte(config.StorageProvider), &provider); err == nil {
+			openStorageProvider(&provider)
 			result.StorageProvider = &provider
 		}
 	}
@@ -168,7 +169,7 @@ func SaveCurrentUserModelConfig(ctx context.Context, raw json.RawMessage) (UserC
 		config.UserID = user.ID
 		config.CreatedAt = current
 	}
-	config.ModelConfig = string(raw)
+	config.ModelConfig = string(SealUserModelConfigJSON(raw))
 	config.UpdatedAt = current
 	if _, err := repository.SaveUserConfig(config); err != nil {
 		return UserConfigPayload{}, err
