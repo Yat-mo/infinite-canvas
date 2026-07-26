@@ -23,6 +23,7 @@ var adminModelHTTPClient = &http.Client{Timeout: 30 * time.Second}
 func PublicSettings() (model.PublicSetting, error) {
 	settings, err := repository.GetSettings()
 	settings = normalizeSettings(settings)
+	decryptPrivateSecrets(&settings)
 	settings.Public.ModelChannel.Channels = publicChannelInfos(settings.Private.Channels)
 	if len(settings.Public.ModelChannel.AvailableModels) == 0 {
 		settings.Public.ModelChannel.AvailableModels = enabledChannelModels(settings.Private.Channels)
@@ -40,7 +41,9 @@ func UserCanUseRemoteModelChannel(user model.AuthUser) bool {
 
 func AdminSettings() (model.Settings, error) {
 	settings, err := repository.GetSettings()
-	return hidePrivateAPIKeys(normalizeSettings(settings)), err
+	settings = normalizeSettings(settings)
+	decryptPrivateSecrets(&settings)
+	return hidePrivateAPIKeys(settings), err
 }
 
 func SaveSettings(settings model.Settings) (model.Settings, error) {
@@ -48,16 +51,21 @@ func SaveSettings(settings model.Settings) (model.Settings, error) {
 	if err != nil {
 		return model.Settings{}, err
 	}
+	saved = normalizeSettings(saved)
+	decryptPrivateSecrets(&saved)
 	settings = normalizeSettings(settings)
-	keepPrivateAPIKeys(&settings, normalizeSettings(saved))
-	keepPrivateAuthSecrets(&settings, normalizeSettings(saved))
-	keepPrivateStorageSecrets(&settings, normalizeSettings(saved))
+	keepPrivateAPIKeys(&settings, saved)
+	keepPrivateAuthSecrets(&settings, saved)
+	keepPrivateStorageSecrets(&settings, saved)
+	encryptPrivateSecrets(&settings)
 	result, err := repository.SaveSettings(settings, now())
 	if err == nil {
 		RefreshPromptSyncScheduler()
 		RefreshStorageCapacityScheduler()
 		RefreshAILogCleanupScheduler()
 	}
+	result = normalizeSettings(result)
+	decryptPrivateSecrets(&result)
 	return hidePrivateAPIKeys(result), err
 }
 
@@ -275,7 +283,7 @@ func SelectModelChannel(modelName string) (model.ModelChannel, error) {
 }
 
 func SelectModelChannelForModel(modelName string, channelID string) (model.ModelChannel, error) {
-	settings, err := repository.GetSettings()
+	settings, err := loadSettingsDecrypted()
 	if err != nil {
 		return model.ModelChannel{}, err
 	}
@@ -445,7 +453,7 @@ func normalizeModelChannel(channel model.ModelChannel) model.ModelChannel {
 func resolveAdminChannel(index *int, channel model.ModelChannel) (model.ModelChannel, error) {
 	resolved := normalizeModelChannel(channel)
 	if strings.TrimSpace(resolved.APIKey) == "" {
-		settings, err := repository.GetSettings()
+		settings, err := loadSettingsDecrypted()
 		if err != nil {
 			return model.ModelChannel{}, err
 		}
@@ -871,4 +879,34 @@ func collectChannelModels(channels []model.ModelChannel) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+func loadSettingsDecrypted() (model.Settings, error) {
+	settings, err := repository.GetSettings()
+	if err != nil {
+		return model.Settings{}, err
+	}
+	settings = normalizeSettings(settings)
+	decryptPrivateSecrets(&settings)
+	return settings, nil
+}
+
+func decryptPrivateSecrets(settings *model.Settings) {
+	for i := range settings.Private.Channels {
+		settings.Private.Channels[i].APIKey = mustDecryptSecret(settings.Private.Channels[i].APIKey)
+	}
+	for i := range settings.Private.Storage.Providers {
+		settings.Private.Storage.Providers[i].SecretAccessKey = mustDecryptSecret(settings.Private.Storage.Providers[i].SecretAccessKey)
+	}
+	settings.Private.Auth.LinuxDo.ClientSecret = mustDecryptSecret(settings.Private.Auth.LinuxDo.ClientSecret)
+}
+
+func encryptPrivateSecrets(settings *model.Settings) {
+	for i := range settings.Private.Channels {
+		settings.Private.Channels[i].APIKey = mustEncryptSecret(settings.Private.Channels[i].APIKey)
+	}
+	for i := range settings.Private.Storage.Providers {
+		settings.Private.Storage.Providers[i].SecretAccessKey = mustEncryptSecret(settings.Private.Storage.Providers[i].SecretAccessKey)
+	}
+	settings.Private.Auth.LinuxDo.ClientSecret = mustEncryptSecret(settings.Private.Auth.LinuxDo.ClientSecret)
 }

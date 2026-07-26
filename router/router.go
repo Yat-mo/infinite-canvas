@@ -16,8 +16,8 @@ func New() *gin.Engine {
 	api.GET("/health", func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})
-	api.POST("/auth/register", gin.WrapF(handler.Register))
-	api.POST("/auth/login", gin.WrapF(handler.Login))
+	api.POST("/auth/register", middleware.RateLimit(10, 0), gin.WrapF(handler.Register))
+	api.POST("/auth/login", middleware.RateLimit(20, 0), gin.WrapF(handler.Login))
 	api.GET("/auth/linux-do/authorize", gin.WrapF(handler.LinuxDoAuthorize))
 	api.GET("/auth/linux-do/callback", gin.WrapF(handler.LinuxDoCallback))
 	api.GET("/auth/me", middleware.OptionalAuth, gin.WrapF(handler.CurrentUser))
@@ -83,6 +83,9 @@ func New() *gin.Engine {
 	v1.POST("/user-config/model", gin.WrapF(handler.SaveUserModelConfig))
 	v1.POST("/user-config/storage", gin.WrapF(handler.SaveUserStorageProvider))
 	v1.GET("/canvas/projects", gin.WrapF(handler.UserCanvasProjects))
+	v1.GET("/canvas/projects/:id", func(c *gin.Context) {
+		handler.UserCanvasProject(c.Writer, c.Request, c.Param("id"))
+	})
 	v1.POST("/canvas/projects", gin.WrapF(handler.SaveUserCanvasProject))
 	v1.POST("/canvas/projects/sync", gin.WrapF(handler.SyncUserCanvasProjects))
 	v1.POST("/canvas/projects/delete", gin.WrapF(handler.DeleteUserCanvasProjects))
@@ -105,7 +108,7 @@ func New() *gin.Engine {
 	api.GET("/proxy-image", middleware.UserAuth, gin.WrapF(handler.ProxyImage))
 	api.GET("/prompts", middleware.OptionalAuth, gin.WrapF(handler.Prompts))
 	api.GET("/assets", middleware.OptionalAuth, gin.WrapF(handler.Assets))
-	api.POST("/admin/login", gin.WrapF(handler.AdminLogin))
+	api.POST("/admin/login", middleware.RateLimit(20, 0), gin.WrapF(handler.AdminLogin))
 
 	admin := api.Group("/admin", middleware.AdminAuth)
 	admin.GET("/users", gin.WrapF(handler.AdminUsers))

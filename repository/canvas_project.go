@@ -9,6 +9,24 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+
+func GetUserCanvasProject(userID string, projectID string) (model.CanvasProject, error) {
+	db, err := DB()
+	if err != nil {
+		return model.CanvasProject{}, err
+	}
+	var project model.CanvasProject
+	err = db.Where(
+		"user_id = ? AND id = ? AND deleted_at = ''",
+		strings.TrimSpace(userID),
+		strings.TrimSpace(projectID),
+	).First(&project).Error
+	if err != nil {
+		return model.CanvasProject{}, err
+	}
+	return project, nil
+}
+
 func ListUserCanvasProjects(userID string) ([]model.CanvasProject, error) {
 	db, err := DB()
 	if err != nil {

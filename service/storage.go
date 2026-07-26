@@ -79,7 +79,7 @@ func canUseGlobalStorage(ctx context.Context, storage model.PrivateStorageSettin
 
 // HasActiveCloudStorage 判断当前请求是否有可用的云存储。
 func HasActiveCloudStorage(ctx context.Context) (bool, error) {
-	settings, err := repository.GetSettings()
+	settings, err := loadSettingsDecrypted()
 	if err != nil {
 		return false, err
 	}
@@ -95,6 +95,7 @@ func HasActiveCloudStorage(ctx context.Context) (bool, error) {
 			if err == nil && found && strings.TrimSpace(config.StorageProvider) != "" {
 				var provider StorageObjectProviderInput
 				if err := json.Unmarshal([]byte(config.StorageProvider), &provider); err == nil {
+					openStorageProvider(&provider)
 					enabled := true
 					if provider.Enabled != nil {
 						enabled = *provider.Enabled
@@ -111,7 +112,7 @@ func HasActiveCloudStorage(ctx context.Context) (bool, error) {
 
 // PublicStorageConfig 返回公开存储配置。
 func PublicStorageConfig() (model.PublicStorageSetting, error) {
-	settings, err := repository.GetSettings()
+	settings, err := loadSettingsDecrypted()
 	if err != nil {
 		return model.PublicStorageSetting{}, err
 	}
@@ -135,6 +136,8 @@ func StorageObjectInfo(id string) (model.StorageObject, error) {
 
 // SaveCurrentUserStorageProvider 保存用户配置的 S3/R2 存储提供商。
 func SaveCurrentUserStorageProvider(ctx context.Context, provider StorageObjectProviderInput) (UserConfigPayload, error) {
+	// Encrypt secret at rest before persistence.
+	sealStorageProvider(&provider)
 	user, ok := UserFromContext(ctx)
 	if !ok || user.ID == "" {
 		return UserConfigPayload{}, errors.New("请先登录")
@@ -169,7 +172,7 @@ func UploadStorageObject(ctx context.Context, filename string, contentType strin
 
 // UploadStorageObjectWithProvider 上传对象到存储（可选用户自定义 Provider）。
 func UploadStorageObjectWithProvider(ctx context.Context, filename string, contentType string, data []byte, providerInput *StorageObjectProviderInput) (UploadedStorageObject, error) {
-	settings, err := repository.GetSettings()
+	settings, err := loadSettingsDecrypted()
 	if err != nil {
 		return UploadedStorageObject{}, err
 	}
@@ -232,7 +235,7 @@ func DeleteStorageObject(ctx context.Context, id string, providerInput *StorageO
 	if user, ok := UserFromContext(ctx); ok && object.CreatedBy != "" && object.CreatedBy != user.ID {
 		return errors.New("无权删除该对象")
 	}
-	settings, err := repository.GetSettings()
+	settings, err := loadSettingsDecrypted()
 	if err != nil {
 		return err
 	}
@@ -263,7 +266,7 @@ func MeasureUserStorageProvider(ctx context.Context, providerInput StorageObject
 
 // MeasureAdminStorageProvider 管理员统计存储容量。
 func MeasureAdminStorageProvider(index int, providerInput *model.StorageProvider) (StorageCapacityResult, error) {
-	settings, err := repository.GetSettings()
+	settings, err := loadSettingsDecrypted()
 	if err != nil {
 		return StorageCapacityResult{}, err
 	}
@@ -305,7 +308,7 @@ func MeasureAdminStorageProvider(index int, providerInput *model.StorageProvider
 
 // MeasureAllEnabledStorageProviders 统计所有启用的存储提供商的容量。
 func MeasureAllEnabledStorageProviders() {
-	settings, err := repository.GetSettings()
+	settings, err := loadSettingsDecrypted()
 	if err != nil {
 		log.Printf("storage capacity settings load failed err=%v", err)
 		return
@@ -358,7 +361,7 @@ func RefreshStorageCapacityScheduler() {
 	for _, entry := range storageCapacityCron.Entries() {
 		storageCapacityCron.Remove(entry.ID)
 	}
-	settings, err := repository.GetSettings()
+	settings, err := loadSettingsDecrypted()
 	if err != nil {
 		log.Printf("load storage capacity setting failed err=%v", err)
 		return
@@ -387,6 +390,7 @@ func DownloadStorageObject(id string) (DownloadedStorageObject, error) {
 		if err == nil && found && userConfig.StorageProvider != "" {
 			var providerInput StorageObjectProviderInput
 			if err := json.Unmarshal([]byte(userConfig.StorageProvider), &providerInput); err == nil {
+				openStorageProvider(&providerInput)
 				provider = normalizeStorageProvider(model.StorageProvider{
 					Name:            providerInput.Name,
 					Type:            providerInput.Type,
@@ -407,7 +411,7 @@ func DownloadStorageObject(id string) (DownloadedStorageObject, error) {
 	}
 
 	if !ok {
-		settings, err := repository.GetSettings()
+		settings, err := loadSettingsDecrypted()
 		if err == nil {
 			provider, ok = findSavedStorageProvider(model.StorageProvider{ID: object.ProviderID}, normalizePrivateStorageSetting(settings.Private.Storage).Providers, -1)
 		}

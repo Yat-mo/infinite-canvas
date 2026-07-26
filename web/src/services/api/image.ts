@@ -6,6 +6,11 @@ import { buildApiUrl, channelIdForActiveModel, localChannelForActiveModel, type 
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import { nanoid } from "nanoid";
+import { formatActionableError } from "@/lib/actionable-error";
+
+function asActionableError(error: unknown): Error {
+    return new Error(formatActionableError(error));
+}
 
 export type ChatCompletionMessage = {
     role: "system" | "user" | "assistant";

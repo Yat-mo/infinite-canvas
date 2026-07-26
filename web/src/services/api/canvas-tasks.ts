@@ -2,30 +2,57 @@ import type { CanvasProject } from "@/app/(user)/canvas/stores/use-canvas-store"
 import { apiGet, apiPost } from "@/services/api/request";
 import { useUserStore } from "@/stores/use-user-store";
 
+export type CanvasProjectSummary = {
+    id: string;
+    title: string;
+    createdAt: string;
+    updatedAt: string;
+    nodeCount: number;
+    connectionCount: number;
+};
+
+export async function listCanvasProjectSummaries(token: string) {
+    return apiGet<CanvasProjectSummary[]>("/api/v1/canvas/projects", undefined, token);
+}
+
+/** @deprecated prefer listCanvasProjectSummaries + getCanvasProject */
 export async function listCanvasProjects(token: string) {
-    return apiGet<CanvasProject[]>("/api/v1/canvas/projects", undefined, token);
+    const summaries = await listCanvasProjectSummaries(token);
+    const projects = await Promise.all(
+        summaries.map(async (summary) => {
+            try {
+                return await getCanvasProject(token, summary.id);
+            } catch {
+                return {
+                    id: summary.id,
+                    title: summary.title,
+                    createdAt: summary.createdAt,
+                    updatedAt: summary.updatedAt,
+                    nodes: [],
+                    connections: [],
+                    chatSessions: [],
+                    activeChatId: null,
+                    backgroundMode: "lines" as const,
+                    showImageInfo: true,
+                    viewport: { x: 0, y: 0, k: 1 },
+                    sidePanel: { open: true, width: 280 },
+                } satisfies CanvasProject;
+            }
+        }),
+    );
+    return projects;
 }
 
-export async function saveCanvasProject(
-    token: string,
-    project: CanvasProject,
-) {
-    return apiPost<CanvasProject>(
-        "/api/v1/canvas/projects",
-        { data: project },
-        token,
-    );
+export async function getCanvasProject(token: string, id: string) {
+    return apiGet<CanvasProject>(`/api/v1/canvas/projects/${encodeURIComponent(id)}`, undefined, token);
 }
 
-export async function syncCanvasProjects(
-    token: string,
-    projects: CanvasProject[],
-) {
-    return apiPost<CanvasProject[]>(
-        "/api/v1/canvas/projects/sync",
-        { projects },
-        token,
-    );
+export async function saveCanvasProject(token: string, project: CanvasProject) {
+    return apiPost<CanvasProject>("/api/v1/canvas/projects", { data: project }, token);
+}
+
+export async function syncCanvasProjects(token: string, projects: CanvasProject[]) {
+    return apiPost<CanvasProject[]>("/api/v1/canvas/projects/sync", { projects }, token);
 }
 
 export async function deleteCanvasTasks(sourceId: string, nodeIds: string[] = []) {
@@ -44,13 +71,7 @@ export async function deleteCanvasTasks(sourceId: string, nodeIds: string[] = []
 
 export async function deleteCanvasProjects(ids: string[]) {
     const token = useUserStore.getState().token;
-    const projectIds = Array.from(
-        new Set(ids.map((id) => id.trim()).filter(Boolean)),
-    );
+    const projectIds = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
     if (!token || !projectIds.length) return;
-    return apiPost<{ deleted: boolean }>(
-        "/api/v1/canvas/projects/delete",
-        { ids: projectIds },
-        token,
-    );
+    return apiPost<{ deleted: boolean }>("/api/v1/canvas/projects/delete", { ids: projectIds }, token);
 }

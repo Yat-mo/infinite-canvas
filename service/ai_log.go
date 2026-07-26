@@ -17,7 +17,6 @@ import (
 
 	"github.com/tigerowo/infinite-canvas/config"
 	"github.com/tigerowo/infinite-canvas/model"
-	"github.com/tigerowo/infinite-canvas/repository"
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 )
@@ -152,7 +151,7 @@ func RefreshAILogCleanupScheduler() {
 	for _, entry := range aiLogCleanupCron.Entries() {
 		aiLogCleanupCron.Remove(entry.ID)
 	}
-	settings, err := repository.GetSettings()
+	settings, err := loadSettingsDecrypted()
 	if err != nil {
 		log.Printf("load ai log cleanup setting failed err=%v", err)
 		return
@@ -197,7 +196,7 @@ func normalizeAILogSetting(setting model.AILogSetting) model.AILogSetting {
 }
 
 func LocalDirectAILogEnabled() bool {
-	settings, err := repository.GetSettings()
+	settings, err := loadSettingsDecrypted()
 	if err != nil {
 		log.Printf("load local direct ai log setting failed err=%v", err)
 		return false

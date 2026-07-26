@@ -10,6 +10,31 @@ import { defaultUserStorageProvider, saveUserStorageProvider } from "@/services/
 import { useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 
+function readHashConfig() {
+    const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+    if (!hash) return { baseUrl: "", apiKey: "" };
+    const params = new URLSearchParams(hash);
+    return {
+        baseUrl: params.get("baseUrl") || params.get("baseurl") || "",
+        apiKey: params.get("apiKey") || params.get("apikey") || "",
+    };
+}
+
+function clearSensitiveQueryParams() {
+    const searchParams = new URLSearchParams(window.location.search);
+    let changed = false;
+    for (const key of ["apiKey", "apikey", "baseUrl", "baseurl"]) {
+        if (searchParams.has(key)) {
+            searchParams.delete(key);
+            changed = true;
+        }
+    }
+    if (!changed) return false;
+    const next = `${window.location.pathname}${searchParams.size ? `?${searchParams}` : ""}${window.location.hash}`;
+    window.history.replaceState(null, "", next);
+    return true;
+}
+
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
     const handledConfigParams = useRef(false);
@@ -65,18 +90,20 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     }, [token, updateConfig, user?.id]);
 
     useEffect(() => {
+        // Never accept secrets from query string; strip if present.
+        if (clearSensitiveQueryParams()) {
+            message.warning("已忽略 URL 查询参数中的密钥，请改用 #apiKey=...&baseUrl=... 片段注入");
+        }
+    }, [message]);
+
+    useEffect(() => {
         if (handledConfigParams.current) return;
-        const searchParams = new URLSearchParams(window.location.search);
-        const baseUrl = searchParams.get("baseUrl") || searchParams.get("baseurl");
-        const apiKey = searchParams.get("apiKey") || searchParams.get("apikey");
+        const { baseUrl, apiKey } = readHashConfig();
         if (!baseUrl && !apiKey) return;
         if (!publicSettings) return;
         handledConfigParams.current = true;
-        searchParams.delete("baseUrl");
-        searchParams.delete("baseurl");
-        searchParams.delete("apiKey");
-        searchParams.delete("apikey");
-        window.history.replaceState(null, "", `${window.location.pathname}${searchParams.size ? `?${searchParams}` : ""}${window.location.hash}`);
+        // Clear hash after reading secrets so they do not linger in history UI.
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
         if (!publicSettings.modelChannel.allowCustomChannel) {
             openConfigDialog(false);
             message.error("后台未允许用户自定义渠道，请联系管理员进行配置");
@@ -86,6 +113,26 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         if (baseUrl) updateConfig("baseUrl", baseUrl);
         if (apiKey) updateConfig("apiKey", apiKey);
         openConfigDialog(false);
+        message.success("已从安全片段写入渠道配置");
+    }, [message, openConfigDialog, publicSettings, updateConfig]);
+
+    useEffect(() => {
+        const onMessage = (event: MessageEvent) => {
+            if (event.origin !== window.location.origin) return;
+            const data = event.data as { type?: string; baseUrl?: string; apiKey?: string } | null;
+            if (!data || data.type !== "infinite-canvas:channel-config") return;
+            if (!publicSettings?.modelChannel.allowCustomChannel) {
+                message.error("后台未允许用户自定义渠道");
+                return;
+            }
+            updateConfig("channelMode", "local");
+            if (data.baseUrl) updateConfig("baseUrl", data.baseUrl);
+            if (data.apiKey) updateConfig("apiKey", data.apiKey);
+            openConfigDialog(false);
+            message.success("已通过 postMessage 写入渠道配置");
+        };
+        window.addEventListener("message", onMessage);
+        return () => window.removeEventListener("message", onMessage);
     }, [message, openConfigDialog, publicSettings, updateConfig]);
 
     return <>{children}</>;

@@ -14,6 +14,7 @@ import type { CanvasExportFile } from "./export-types";
 import { useCanvasStore } from "./stores/use-canvas-store";
 import { useCanvasUiStore } from "./stores/use-canvas-ui-store";
 import { exportCanvasProjects } from "./utils/canvas-export";
+import { canvasRecipes } from "@/lib/canvas-recipes";
 
 export default function CanvasPage() {
     const { message } = App.useApp();
@@ -30,6 +31,17 @@ export default function CanvasPage() {
         router.push(`/canvas/${id}`);
     };
     const createAndEnter = () => enterProject(createProject(`无限画布 ${projects.length + 1}`));
+    const createFromRecipe = (recipeId: string) => {
+        const recipe = canvasRecipes.find((item) => item.id === recipeId);
+        if (!recipe) return;
+        const built = recipe.build();
+        const id = importProject({
+            title: built.title,
+            nodes: built.nodes,
+            connections: built.connections,
+        });
+        enterProject(id);
+    };
     const importCanvas = async (file?: File) => {
         if (!file) return;
         try {
@@ -98,12 +110,25 @@ export default function CanvasPage() {
                         ))}
                     </div>
                 ) : (
-                    <section className="flex min-h-[360px] flex-col items-center justify-center border-y border-stone-200 text-center dark:border-stone-800">
+                    <section className="flex min-h-[360px] flex-col items-center justify-center border-y border-stone-200 px-4 text-center dark:border-stone-800">
                         <h2 className="text-xl font-medium">还没有画布</h2>
-                        <p className="mt-3 text-sm text-stone-500">新建一个画布后，就可以独立保存节点、连线和画布外观。</p>
+                        <p className="mt-3 text-sm text-stone-500">新建空白画布，或从下面的配方一键起手。</p>
                         <Button type="primary" className="mt-6" icon={<Plus className="size-4" />} onClick={createAndEnter}>
                             新建画布
                         </Button>
+                        <div className="mt-8 grid w-full max-w-3xl gap-3 text-left sm:grid-cols-2">
+                            {canvasRecipes.map((recipe) => (
+                                <button
+                                    key={recipe.id}
+                                    type="button"
+                                    className="rounded-xl border border-stone-200 bg-white px-4 py-3 text-left transition hover:border-stone-400 dark:border-stone-700 dark:bg-white/5 dark:hover:border-stone-500"
+                                    onClick={() => createFromRecipe(recipe.id)}
+                                >
+                                    <div className="font-medium">{recipe.title}</div>
+                                    <div className="mt-1 text-xs text-stone-500">{recipe.description}</div>
+                                </button>
+                            ))}
+                        </div>
                     </section>
                 )}
             </div>
