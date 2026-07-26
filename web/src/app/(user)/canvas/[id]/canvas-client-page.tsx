@@ -54,6 +54,8 @@ import { AssetPickerModal, type AssetPickerTab, type InsertAssetPayload } from "
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { CANVAS_ASSET_DRAG_TYPE, CanvasSidePanel } from "../components/canvas-side-panel";
 import { DEFAULT_CANVAS_SIDE_PANEL, useCanvasStore } from "../stores/use-canvas-store";
+import { useCanvasDocument } from "../hooks/use-canvas-document";
+import { useCanvasPersistence } from "../hooks/use-canvas-persistence";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import {
     CanvasNodeType,
@@ -286,14 +288,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const draggedAssetPayloadRef = useRef<InsertAssetPayload | null>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
     const clipboardRef = useRef<CanvasClipboard | null>(null);
-    const historyRef = useRef<{ past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }>({ past: [], future: [] });
-    const lastHistoryRef = useRef<CanvasHistoryEntry | null>(null);
-    const historyCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const viewportSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const sidePanelSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const focusAnimationRef = useRef<number | null>(null);
-    const applyingHistoryRef = useRef(false);
-    const historyPausedRef = useRef(false);
     const didInitialCenterRef = useRef(false);
     const rafRef = useRef<number | null>(null);
     const uploadingVideoNodeIdsRef = useRef(new Set<string>());
@@ -321,20 +316,57 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
     const cleanupAssetImages = useAssetStore((state) => state.cleanupImages);
-    const hydrated = useCanvasStore((state) => state.hydrated);
     const createProject = useCanvasStore((state) => state.createProject);
-    const openProject = useCanvasStore((state) => state.openProject);
-    const updateProject = useCanvasStore((state) => state.updateProject);
     const renameProject = useCanvasStore((state) => state.renameProject);
     const deleteProjects = useCanvasStore((state) => state.deleteProjects);
     const currentProject = useCanvasStore((state) => state.projects.find((project) => project.id === projectId));
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
-    const [nodes, setNodes] = useState<CanvasNodeData[]>([]);
-    const [connections, setConnections] = useState<CanvasConnection[]>([]);
-    const [chatSessions, setChatSessions] = useState<CanvasAssistantSession[]>([]);
-    const [activeChatId, setActiveChatId] = useState<string | null>(null);
-    const [viewport, setViewport] = useState<ViewportTransform>({ x: 0, y: 0, k: 1 });
+    const documentHelpers = useMemo(
+        () => ({
+            hydrateCanvasImages,
+            hydrateAssistantImages,
+            resetInterruptedGeneration,
+        }),
+        [],
+    );
+    const {
+        nodes,
+        setNodes,
+        connections,
+        setConnections,
+        chatSessions,
+        setChatSessions,
+        activeChatId,
+        setActiveChatId,
+        backgroundMode,
+        setBackgroundMode,
+        showImageInfo,
+        setShowImageInfo,
+        viewport,
+        setViewport,
+        sidePanel,
+        setSidePanel,
+        projectLoaded,
+        historyState,
+        historyRef,
+        lastHistoryRef,
+        historyPausedRef,
+        applyingHistoryRef,
+        createHistoryEntry,
+        undoCanvas,
+        redoCanvas,
+    } = useCanvasDocument(projectId, documentHelpers);
+    useCanvasPersistence(projectId, projectLoaded, false, {
+        nodes,
+        connections,
+        chatSessions,
+        activeChatId,
+        backgroundMode,
+        showImageInfo,
+        viewport,
+        sidePanel,
+    });
     const [size, setSize] = useState({ width: 1200, height: 720 });
     const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
     const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
@@ -348,14 +380,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const [nodeCreatePosition, setNodeCreatePosition] = useState<Position | null>(null);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(false);
-    const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
-    const [showImageInfo, setShowImageInfo] = useState(false);
-    const [sidePanel, setSidePanel] = useState(() => DEFAULT_CANVAS_SIDE_PANEL);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [assetPickerTab, setAssetPickerTab] = useState<AssetPickerTab>("my-assets");
     const [pendingPanoramaImport, setPendingPanoramaImport] = useState<PendingPanoramaImport | null>(null);
-    const [projectLoaded, setProjectLoaded] = useState(false);
     const [toolbarNodeId, setToolbarNodeId] = useState<string | null>(null);
     const [nodeImageSettingsOpen, setNodeImageSettingsOpen] = useState(false);
     const [dialogNodeId, setDialogNodeId] = useState<string | null>(null);
@@ -376,7 +404,6 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const [assistantMounted, setAssistantMounted] = useState(false);
     const [titleEditing, setTitleEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState("");
-    const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
     const [collapsingBatchIds, setCollapsingBatchIds] = useState<Set<string>>(new Set());
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
@@ -395,18 +422,6 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const pollingImageNodeIdsRef = useRef(new Set<string>());
     const pollingAudioNodeIdsRef = useRef(new Set<string>());
     const hasLoadingTimedNodes = nodes.some((node) => node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && (node.type === CanvasNodeType.Video || isCanvasImageNodeType(node.type) || node.type === CanvasNodeType.Audio));
-
-    const createHistoryEntry = useCallback(
-        (): CanvasHistoryEntry => ({
-            nodes: nodesRef.current,
-            connections: connectionsRef.current,
-            chatSessions,
-            activeChatId,
-            backgroundMode,
-            showImageInfo,
-        }),
-        [activeChatId, backgroundMode, chatSessions, showImageInfo],
-    );
 
     const cleanupCanvasFiles = useCallback(
         (extra?: unknown) => {
@@ -445,76 +460,6 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         window.addEventListener("keydown", handlePreviewKeyDown);
         return () => window.removeEventListener("keydown", handlePreviewKeyDown);
     }, [previewNodeId, getBatchGroupNodes]);
-
-    useEffect(() => {
-        if (!hydrated) return;
-        setProjectLoaded(false);
-        const project = openProject(projectId);
-        if (!project) {
-            router.replace("/canvas");
-            return;
-        }
-
-        const restore = async () => {
-            const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes));
-            const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
-            setNodes(restoredNodes);
-            setConnections(project.connections);
-            setChatSessions(restoredSessions);
-            setActiveChatId(project.activeChatId || null);
-            setBackgroundMode(project.backgroundMode);
-            setShowImageInfo(project.showImageInfo || false);
-            setViewport(project.viewport);
-            setSidePanel(project.sidePanel || DEFAULT_CANVAS_SIDE_PANEL);
-            historyRef.current = { past: [], future: [] };
-            if (historyCommitTimerRef.current) {
-                clearTimeout(historyCommitTimerRef.current);
-                historyCommitTimerRef.current = null;
-            }
-            lastHistoryRef.current = {
-                nodes: restoredNodes,
-                connections: project.connections,
-                chatSessions: restoredSessions,
-                activeChatId: project.activeChatId || null,
-                backgroundMode: project.backgroundMode,
-                showImageInfo: project.showImageInfo || false,
-            };
-            setHistoryState({ canUndo: false, canRedo: false });
-            setProjectLoaded(true);
-        };
-        void restore();
-    }, [hydrated, openProject, projectId, router]);
-
-    useEffect(() => {
-        if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current) return;
-        const next = createHistoryEntry();
-        const previous = lastHistoryRef.current;
-        if (previous?.nodes === next.nodes && previous.connections === next.connections && previous.chatSessions === next.chatSessions && previous.activeChatId === next.activeChatId && previous.backgroundMode === next.backgroundMode && previous.showImageInfo === next.showImageInfo) return;
-
-        if (historyCommitTimerRef.current) clearTimeout(historyCommitTimerRef.current);
-        historyCommitTimerRef.current = setTimeout(() => {
-            const current = createHistoryEntry();
-            const last = lastHistoryRef.current;
-            if (!last) return;
-            historyRef.current.past = [...historyRef.current.past.slice(-49), last];
-            historyRef.current.future = [];
-            setHistoryState({ canUndo: true, canRedo: false });
-            lastHistoryRef.current = current;
-            historyCommitTimerRef.current = null;
-        }, 180);
-
-        return () => {
-            if (historyCommitTimerRef.current) {
-                clearTimeout(historyCommitTimerRef.current);
-                historyCommitTimerRef.current = null;
-            }
-        };
-    }, [activeChatId, backgroundMode, chatSessions, connections, createHistoryEntry, nodes, projectLoaded, showImageInfo]);
-
-    useEffect(() => {
-        if (!projectLoaded || historyPausedRef.current) return;
-        updateProject(projectId, { nodes, connections, chatSessions, activeChatId, backgroundMode, showImageInfo });
-    }, [activeChatId, backgroundMode, chatSessions, connections, nodes, projectId, projectLoaded, showImageInfo, updateProject]);
 
     useEffect(() => {
         if (!projectLoaded) return;
@@ -577,30 +522,6 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     useEffect(() => {
         if (!dialogNodeId) setNodeImageSettingsOpen(false);
     }, [dialogNodeId]);
-
-    useEffect(() => {
-        if (!projectLoaded) return;
-        if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
-        viewportSaveTimerRef.current = setTimeout(() => {
-            updateProject(projectId, { viewport: viewportRef.current });
-            viewportSaveTimerRef.current = null;
-        }, 500);
-        return () => {
-            if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
-        };
-    }, [projectId, projectLoaded, updateProject, viewport]);
-
-    useEffect(() => {
-        if (!projectLoaded) return;
-        if (sidePanelSaveTimerRef.current) clearTimeout(sidePanelSaveTimerRef.current);
-        sidePanelSaveTimerRef.current = setTimeout(() => {
-            updateProject(projectId, { sidePanel });
-            sidePanelSaveTimerRef.current = null;
-        }, 500);
-        return () => {
-            if (sidePanelSaveTimerRef.current) clearTimeout(sidePanelSaveTimerRef.current);
-        };
-    }, [projectId, projectLoaded, sidePanel, updateProject]);
 
     useLayoutEffect(() => {
         nodesRef.current = nodes;
@@ -1174,44 +1095,6 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         },
         [size.height, size.width],
     );
-
-    const applyHistory = useCallback((entry: CanvasHistoryEntry) => {
-        if (historyCommitTimerRef.current) {
-            clearTimeout(historyCommitTimerRef.current);
-            historyCommitTimerRef.current = null;
-        }
-        applyingHistoryRef.current = true;
-        setNodes(entry.nodes);
-        setConnections(entry.connections);
-        setChatSessions(entry.chatSessions);
-        setActiveChatId(entry.activeChatId);
-        setBackgroundMode(entry.backgroundMode);
-        setShowImageInfo(entry.showImageInfo);
-        setSelectedNodeIds(new Set());
-        setSelectedConnectionId(null);
-        setContextMenu(null);
-        setTimeout(() => {
-            lastHistoryRef.current = entry;
-            applyingHistoryRef.current = false;
-            setHistoryState({ canUndo: historyRef.current.past.length > 0, canRedo: historyRef.current.future.length > 0 });
-        });
-    }, []);
-
-    const undoCanvas = useCallback(() => {
-        const previous = historyRef.current.past.pop();
-        const current = lastHistoryRef.current;
-        if (!previous || !current) return;
-        historyRef.current.future.push(current);
-        applyHistory(previous);
-    }, [applyHistory]);
-
-    const redoCanvas = useCallback(() => {
-        const next = historyRef.current.future.pop();
-        const current = lastHistoryRef.current;
-        if (!next || !current) return;
-        historyRef.current.past.push(current);
-        applyHistory(next);
-    }, [applyHistory]);
 
     const createAndOpenProject = useCallback(() => {
         const id = createProject(`无限画布 ${useCanvasStore.getState().projects.length + 1}`);

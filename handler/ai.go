@@ -499,17 +499,8 @@ func agnesVideoQueryID(modelName string, path string) (string, bool) {
 }
 
 func resolveAIProxyPath(channel model.ModelChannel, modelName string, path string) string {
-	if isKIEChannel(channel, modelName) {
-		if path == "/videos" || path == "/images/generations" || path == "/images/edits" {
-			return "/jobs/createTask"
-		}
-		if strings.HasPrefix(path, "/videos/") && !strings.HasSuffix(path, "/content") {
-			taskID := strings.TrimSpace(strings.TrimPrefix(path, "/videos/"))
-			if taskID != "" && !strings.Contains(taskID, "/") {
-				return "/jobs/recordInfo?taskId=" + url.QueryEscape(taskID)
-			}
-		}
-		return path
+	if provider := service.MatchAIProvider(channel, modelName); provider != nil && provider.Name() == "kie" {
+		return provider.ResolvePath(channel, modelName, path)
 	}
 	if isAPIMartChannel(channel, modelName) {
 		if path == "/videos" {
